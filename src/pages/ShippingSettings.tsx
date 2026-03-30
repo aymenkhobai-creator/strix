@@ -12,6 +12,7 @@ interface CarrierConfig {
 interface ManualRate {
   id: string;
   name: string;
+  commune?: string;
   homeFee: number;
   hasStopdesk: boolean;
   stopdeskFee: number;
@@ -51,6 +52,7 @@ export default function ShippingSettings() {
   const [newRate, setNewRate] = useState<ManualRate>({
     id: '',
     name: '',
+    commune: '',
     homeFee: 0,
     hasStopdesk: false,
     stopdeskFee: 0
@@ -149,7 +151,7 @@ export default function ShippingSettings() {
       ...config,
       manualRates: [...(config.manualRates || []), newRate]
     });
-    setNewRate({ id: '', name: '', homeFee: 0, hasStopdesk: false, stopdeskFee: 0 });
+    setNewRate({ id: '', name: '', commune: '', homeFee: 0, hasStopdesk: false, stopdeskFee: 0 });
   };
 
   const removeManualRate = (id: string) => {
@@ -300,8 +302,8 @@ export default function ShippingSettings() {
             <div className="p-10 space-y-8">
               {/* Add New Rate Form */}
               <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 space-y-4">
-                <h3 className="text-sm font-black uppercase tracking-widest text-[#1A202C]">Add Wilaya Rate</h3>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                <h3 className="text-sm font-black uppercase tracking-widest text-[#1A202C]">Add Wilaya / Commune Rate</h3>
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">ID</label>
                     <input 
@@ -319,6 +321,16 @@ export default function ShippingSettings() {
                       placeholder="e.g., Alger"
                       value={newRate.name}
                       onChange={e => setNewRate({...newRate, name: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">Commune (Opt)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Bab Ezzouar"
+                      value={newRate.commune || ''}
+                      onChange={e => setNewRate({...newRate, commune: e.target.value})}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm"
                     />
                   </div>
@@ -369,6 +381,7 @@ export default function ShippingSettings() {
                       <tr className="bg-gray-50 border-b border-gray-100">
                         <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">ID</th>
                         <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Wilaya</th>
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Commune</th>
                         <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Home Fee</th>
                         <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Stopdesk Fee</th>
                         <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400 text-right">Actions</th>
@@ -379,6 +392,7 @@ export default function ShippingSettings() {
                         <tr key={rate.id} className="hover:bg-gray-50/50 transition-colors">
                           <td className="p-4 font-bold text-sm">{rate.id}</td>
                           <td className="p-4 font-bold text-sm">{rate.name}</td>
+                          <td className="p-4 font-bold text-sm text-gray-500">{rate.commune || '-'}</td>
                           <td className="p-4 font-bold text-sm text-[#4C35DE]">{rate.homeFee} DA</td>
                           <td className="p-4 font-bold text-sm text-gray-600">
                             {rate.hasStopdesk ? `${rate.stopdeskFee} DA` : <span className="text-gray-400 italic">N/A</span>}

@@ -19,25 +19,49 @@ export default function Storefront() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState({
+    storeName: 'Strix',
+    heroImage: 'https://picsum.photos/seed/streetwear/1920/1080',
+    storeLogo: ''
+  });
 
   useEffect(() => {
-    async function fetchProducts() {
+    async function fetchData() {
       try {
-        const { data, error: supabaseError } = await supabase
+        // Fetch products
+        const { data: productsData, error: productsError } = await supabase
           .from('products')
           .select('*')
           .order('created_at', { ascending: false });
         
-        if (supabaseError) throw supabaseError;
-        if (data) setProducts(data);
+        if (productsError) throw productsError;
+        if (productsData) setProducts(productsData);
+
+        // Fetch settings
+        if (isMock) {
+          const saved = localStorage.getItem('strix_store_settings');
+          if (saved) {
+            setSettings(prev => ({ ...prev, ...JSON.parse(saved) }));
+          }
+        } else {
+          const { data: settingsData, error: settingsError } = await supabase
+            .from('settings')
+            .select('value')
+            .eq('key', 'store_settings')
+            .single();
+
+          if (!settingsError && settingsData && settingsData.value) {
+            setSettings(prev => ({ ...prev, ...settingsData.value }));
+          }
+        }
       } catch (err: any) {
-        console.error('Error fetching products:', err);
+        console.error('Error fetching data:', err);
         setError(err.message || 'Failed to connect to the database');
       } finally {
         setLoading(false);
       }
     }
-    fetchProducts();
+    fetchData();
   }, []);
 
   if (loading) {
@@ -74,8 +98,11 @@ export default function Storefront() {
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-8">
-          <Link to="/" className="text-2xl font-black tracking-tighter uppercase italic">
-            Strix
+          <Link to="/" className="text-2xl font-black tracking-tighter uppercase italic flex items-center gap-2">
+            {settings.storeLogo ? (
+              <img src={settings.storeLogo} alt={settings.storeName} className="h-8 object-contain" />
+            ) : null}
+            {!settings.storeLogo && settings.storeName}
           </Link>
           <div className="hidden md:flex items-center gap-6 text-sm font-medium text-gray-500">
             <Link to="/" className="hover:text-black transition-colors">Shop</Link>
@@ -96,7 +123,7 @@ export default function Storefront() {
         {/* Hero Section */}
         <section className="relative h-[60vh] rounded-[40px] overflow-hidden bg-black flex items-center px-12">
           <img 
-            src="https://picsum.photos/seed/streetwear/1920/1080" 
+            src={settings.heroImage || "https://picsum.photos/seed/streetwear/1920/1080"} 
             alt="Hero" 
             className="absolute inset-0 w-full h-full object-cover opacity-60"
             referrerPolicy="no-referrer"
@@ -107,7 +134,7 @@ export default function Storefront() {
               animate={{ opacity: 1, y: 0 }}
               className="text-6xl md:text-8xl font-black text-white uppercase italic leading-none tracking-tighter"
             >
-              Drop <span className="text-purple-500">001</span><br />Available Now
+              {settings.storeName || 'Drop 001'} <br /><span className="text-purple-500">Available Now</span>
             </motion.h1>
             <p className="text-gray-300 text-lg max-w-md font-medium">
               Limited edition technical streetwear designed for the modern urban explorer.

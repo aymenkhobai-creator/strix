@@ -50,6 +50,7 @@ interface CarrierConfig {
 interface ManualRate {
   id: string;
   name: string;
+  commune?: string;
   homeFee: number;
   hasStopdesk: boolean;
   stopdeskFee: number;
