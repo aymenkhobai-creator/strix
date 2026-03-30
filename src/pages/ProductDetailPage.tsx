@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, isMock } from '../lib/supabaseClient';
 import { 
   ArrowLeft, 
   ShoppingBag, 
@@ -47,8 +47,16 @@ interface CarrierConfig {
   enabled: boolean;
 }
 
+interface ManualRate {
+  id: string;
+  name: string;
+  homeFee: number;
+  hasStopdesk: boolean;
+  stopdeskFee: number;
+}
+
 interface ShippingConfig {
-  activeCarrier: 'yalidine' | 'zr' | 'nord_ouest' | 'procolis';
+  activeCarrier: 'yalidine' | 'zr' | 'nord_ouest' | 'procolis' | 'manual';
   carriers: {
     yalidine: CarrierConfig;
     zr: CarrierConfig;
@@ -58,10 +66,11 @@ interface ShippingConfig {
   markupAmount: number;
   markupType: 'fixed' | 'percentage';
   enabled: boolean;
+  manualRates: ManualRate[];
 }
 
-const DEFAULT_YALIDINE_ID = '';
-const DEFAULT_YALIDINE_TOKEN = '';
+const DEFAULT_YALIDINE_ID = '723bc48271384896a20bd9652c97e081';
+const DEFAULT_YALIDINE_TOKEN = '9cf201929eb6c87a50166b28f872a5cc21f7f1c537ab595d6d8ed5455c5ec7e7';
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -78,6 +87,8 @@ export default function ProductDetailPage() {
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [selectedWilaya, setSelectedWilaya] = useState('');
   const [selectedCommune, setSelectedCommune] = useState('');
+  const [deliveryMethod, setDeliveryMethod] = useState<'home' | 'desk'>('home');
+  const [availableFees, setAvailableFees] = useState<{home: number | null, desk: number | null}>({home: null, desk: null});
   const [shippingFee, setShippingFee] = useState<number | null>(null);
   const [fetchingWilayas, setFetchingWilayas] = useState(false);
   const [fetchingCommunes, setFetchingCommunes] = useState(false);
@@ -92,23 +103,33 @@ export default function ProductDetailPage() {
     },
     markupAmount: 0,
     markupType: 'fixed',
-    enabled: true
+    enabled: true,
+    manualRates: []
   });
 
   // Helper to get API base URL based on carrier
   const getApiBaseUrl = (carrier: string) => {
     switch (carrier) {
-      case 'yalidine': return 'https://api.yalidine.com/v1';
+      case 'yalidine': return 'https://api.yalidine.app/v1';
       case 'zr': return 'https://api.zrexpress.dz/api/v1';
       case 'nord_ouest': return 'https://api.nordouest.com/v1';
       case 'procolis': return 'https://procolis.com/api_v1';
-      default: return 'https://api.yalidine.com/v1';
+      default: return 'https://api.yalidine.app/v1';
     }
   };
 
   useEffect(() => {
     async function fetchShippingConfig() {
       try {
+        if (isMock) {
+          const saved = localStorage.getItem('strix_shipping_config');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            setShippingConfig({ ...parsed, manualRates: parsed.manualRates || [] });
+          }
+          return;
+        }
+
         const { data, error } = await supabase
           .from('settings')
           .select('value')
@@ -129,10 +150,14 @@ export default function ProductDetailPage() {
               },
               markupAmount: fetchedConfig.markupAmount || 0,
               markupType: fetchedConfig.markupType || 'fixed',
-              enabled: fetchedConfig.enabled !== undefined ? fetchedConfig.enabled : true
+              enabled: fetchedConfig.enabled !== undefined ? fetchedConfig.enabled : true,
+              manualRates: fetchedConfig.manualRates || []
             });
           } else {
-            setShippingConfig(fetchedConfig);
+            setShippingConfig({
+              ...fetchedConfig,
+              manualRates: fetchedConfig.manualRates || []
+            });
           }
         }
       } catch (err) {
@@ -169,14 +194,15 @@ export default function ProductDetailPage() {
   useEffect(() => {
     async function fetchWilayas() {
       if (!shippingConfig.enabled) return;
-      const activeCarrier = shippingConfig.carriers?.[shippingConfig.activeCarrier];
-      if (!activeCarrier || !activeCarrier.id || !activeCarrier.token) return;
-
-      // Validate Yalidine ID format (must be numeric)
-      if (shippingConfig.activeCarrier === 'yalidine' && !/^\d+$/.test(activeCarrier.id)) {
-        console.warn('Yalidine API ID must be numeric');
+      
+      if (shippingConfig.activeCarrier === 'manual') {
+        setWilayas((shippingConfig.manualRates || []).map(r => ({ id: r.id, name: r.name })));
+        setFetchingWilayas(false);
         return;
       }
+
+      const activeCarrier = shippingConfig.carriers?.[shippingConfig.activeCarrier];
+      if (!activeCarrier || !activeCarrier.id || !activeCarrier.token) return;
 
       setFetchingWilayas(true);
       try {
@@ -216,11 +242,17 @@ export default function ProductDetailPage() {
     if (!selectedWilaya) {
       setCommunes([]);
       setSelectedCommune('');
-      setShippingFee(null);
       return;
     }
 
     async function fetchCommunes() {
+      if (shippingConfig.activeCarrier === 'manual') {
+        setCommunes([]);
+        setSelectedCommune('');
+        setFetchingCommunes(false);
+        return;
+      }
+
       const activeCarrier = shippingConfig.carriers?.[shippingConfig.activeCarrier];
       if (!activeCarrier) return;
       setFetchingCommunes(true);
@@ -254,17 +286,49 @@ export default function ProductDetailPage() {
       }
     }
 
+    fetchCommunes();
+  }, [selectedWilaya, shippingConfig.activeCarrier, shippingConfig.carriers]);
+
+  // Fetch Fees when Wilaya or Commune changes
+  useEffect(() => {
+    if (!selectedWilaya) {
+      setAvailableFees({ home: null, desk: null });
+      return;
+    }
+
     async function fetchFees() {
+      setFetchingFees(true);
+      
+      if (shippingConfig.activeCarrier === 'manual') {
+        const rate = shippingConfig.manualRates?.find(r => r.id === selectedWilaya);
+        if (rate) {
+          setAvailableFees({
+            home: rate.homeFee,
+            desk: rate.hasStopdesk ? rate.stopdeskFee : null
+          });
+          if (deliveryMethod === 'desk' && !rate.hasStopdesk) {
+            setDeliveryMethod('home');
+          }
+        } else {
+          setAvailableFees({ home: null, desk: null });
+        }
+        setFetchingFees(false);
+        return;
+      }
+
       const activeCarrier = shippingConfig.carriers?.[shippingConfig.activeCarrier];
       if (!activeCarrier) return;
-      setFetchingFees(true);
       try {
         const baseUrl = getApiBaseUrl(shippingConfig.activeCarrier);
+        const url = selectedCommune 
+          ? `${baseUrl}/shippingfees?wilaya_id=${selectedWilaya}&commune_id=${selectedCommune}`
+          : `${baseUrl}/shippingfees?wilaya_id=${selectedWilaya}`;
+          
         const response = await fetch('/api/shipping-proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            url: `${baseUrl}/shippingfees?wilaya_id=${selectedWilaya}`,
+            url,
             headers: {
               'X-API-ID': activeCarrier.id,
               'X-API-TOKEN': activeCarrier.token
@@ -278,17 +342,14 @@ export default function ProductDetailPage() {
         }
         const data = await response.json();
         if (data.data && data.data.length > 0) {
-          const baseFee = Number(data.data[0].home_fee || data.data[0].desk_fee || 0);
+          const homeFee = data.data[0].home_fee ? Number(data.data[0].home_fee) : null;
+          const deskFee = data.data[0].desk_fee ? Number(data.data[0].desk_fee) : null;
           
-          // Apply markup
-          let finalFee = baseFee;
-          if (shippingConfig.markupType === 'fixed') {
-            finalFee += shippingConfig.markupAmount;
-          } else {
-            finalFee += (baseFee * (shippingConfig.markupAmount / 100));
+          setAvailableFees({ home: homeFee, desk: deskFee });
+          
+          if (deliveryMethod === 'desk' && deskFee === null) {
+            setDeliveryMethod('home');
           }
-          
-          setShippingFee(finalFee);
         }
       } catch (err: any) {
         console.error('Error fetching fees:', err);
@@ -298,9 +359,26 @@ export default function ProductDetailPage() {
       }
     }
 
-    fetchCommunes();
     fetchFees();
-  }, [selectedWilaya]);
+  }, [selectedWilaya, selectedCommune, shippingConfig.activeCarrier, shippingConfig.carriers, shippingConfig.manualRates]);
+
+  // Calculate final shipping fee based on delivery method and markup
+  useEffect(() => {
+    const baseFee = deliveryMethod === 'desk' ? availableFees.desk : availableFees.home;
+    if (baseFee === null || baseFee === undefined) {
+      setShippingFee(null);
+      return;
+    }
+    
+    let finalFee = baseFee;
+    if (shippingConfig.markupType === 'fixed') {
+      finalFee += shippingConfig.markupAmount;
+    } else {
+      finalFee += (baseFee * (shippingConfig.markupAmount / 100));
+    }
+    
+    setShippingFee(finalFee);
+  }, [availableFees, deliveryMethod, shippingConfig.markupAmount, shippingConfig.markupType]);
 
   const totalPrice = useMemo(() => {
     if (!product) return 0;
@@ -308,7 +386,7 @@ export default function ProductDetailPage() {
   }, [product, quantity, shippingFee]);
 
   const handleAddToCart = async () => {
-    if (!customerName || !customerPhone || !selectedWilaya || !selectedCommune) {
+    if (!customerName || !customerPhone || !selectedWilaya || (shippingConfig.activeCarrier !== 'manual' && !selectedCommune)) {
       toast.error('Please fill in all delivery details');
       return;
     }
@@ -316,14 +394,15 @@ export default function ProductDetailPage() {
     setAddingToCart(true);
     try {
       const wilayaName = wilayas.find(w => w.id === selectedWilaya)?.name;
-      const communeName = communes.find(c => c.id === selectedCommune)?.name;
+      const communeName = shippingConfig.activeCarrier === 'manual' ? '' : communes.find(c => c.id === selectedCommune)?.name;
+      const address = shippingConfig.activeCarrier === 'manual' ? wilayaName : `${wilayaName}, ${communeName}`;
       
       const { error } = await supabase
         .from('orders')
         .insert([{
           customer_name: customerName,
           customer_phone: customerPhone,
-          customer_address: `${wilayaName}, ${communeName}`,
+          customer_address: address,
           total_price: totalPrice,
           status: 'pending',
           items: [{
@@ -498,15 +577,43 @@ export default function ProductDetailPage() {
                       value={selectedCommune}
                       onChange={(e) => setSelectedCommune(e.target.value)}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-purple-600 outline-none font-medium text-sm bg-white"
-                      disabled={!selectedWilaya || fetchingCommunes}
+                      disabled={!selectedWilaya || fetchingCommunes || shippingConfig.activeCarrier === 'manual'}
                     >
-                      <option value="">Select Commune</option>
+                      <option value="">{shippingConfig.activeCarrier === 'manual' ? 'N/A' : 'Select Commune'}</option>
                       {communes.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                   </div>
                 </div>
+
+                {/* Delivery Method Toggle */}
+                {selectedWilaya && (availableFees.home !== null || availableFees.desk !== null) && (
+                  <div className="flex gap-4 p-1 bg-gray-100 rounded-xl w-fit">
+                    {availableFees.home !== null && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryMethod('home')}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${
+                          deliveryMethod === 'home' ? 'bg-white shadow-sm text-purple-600' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        Home Delivery
+                      </button>
+                    )}
+                    {availableFees.desk !== null && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryMethod('desk')}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${
+                          deliveryMethod === 'desk' ? 'bg-white shadow-sm text-purple-600' : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        Stopdesk
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {shippingFee !== null && (
                   <motion.div 

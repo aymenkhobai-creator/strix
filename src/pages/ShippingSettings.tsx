@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Save, Loader2, Key, DollarSign, Info } from 'lucide-react';
+import { Truck, Save, Loader2, Key, DollarSign, Info, Plus, Trash2 } from 'lucide-react';
 import { supabase, isMock } from '../lib/supabaseClient';
 import { toast } from 'sonner';
 
@@ -9,8 +9,16 @@ interface CarrierConfig {
   enabled: boolean;
 }
 
+interface ManualRate {
+  id: string;
+  name: string;
+  homeFee: number;
+  hasStopdesk: boolean;
+  stopdeskFee: number;
+}
+
 interface ShippingConfig {
-  activeCarrier: 'yalidine' | 'zr' | 'nord_ouest' | 'procolis';
+  activeCarrier: 'yalidine' | 'zr' | 'nord_ouest' | 'procolis' | 'manual';
   carriers: {
     yalidine: CarrierConfig;
     zr: CarrierConfig;
@@ -20,6 +28,7 @@ interface ShippingConfig {
   markupAmount: number;
   markupType: 'fixed' | 'percentage';
   enabled: boolean;
+  manualRates: ManualRate[];
 }
 
 export default function ShippingSettings() {
@@ -28,14 +37,23 @@ export default function ShippingSettings() {
   const [config, setConfig] = useState<ShippingConfig>({
     activeCarrier: 'yalidine',
     carriers: {
-      yalidine: { id: '', token: '', enabled: true },
+      yalidine: { id: '723bc48271384896a20bd9652c97e081', token: '9cf201929eb6c87a50166b28f872a5cc21f7f1c537ab595d6d8ed5455c5ec7e7', enabled: true },
       zr: { id: '', token: '', enabled: false },
       nord_ouest: { id: '', token: '', enabled: false },
       procolis: { id: '', token: '', enabled: false },
     },
     markupAmount: 0,
     markupType: 'fixed',
-    enabled: true
+    enabled: true,
+    manualRates: []
+  });
+
+  const [newRate, setNewRate] = useState<ManualRate>({
+    id: '',
+    name: '',
+    homeFee: 0,
+    hasStopdesk: false,
+    stopdeskFee: 0
   });
 
   useEffect(() => {
@@ -43,7 +61,10 @@ export default function ShippingSettings() {
       try {
         if (isMock) {
           const saved = localStorage.getItem('strix_shipping_config');
-          if (saved) setConfig(JSON.parse(saved));
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            setConfig({ ...parsed, manualRates: parsed.manualRates || [] });
+          }
           return;
         }
 
@@ -60,17 +81,21 @@ export default function ShippingSettings() {
             setConfig({
               activeCarrier: fetchedConfig.activeCarrier || 'yalidine',
               carriers: fetchedConfig.carriers || {
-                yalidine: { id: fetchedConfig.yalidineId || '', token: fetchedConfig.yalidineToken || '', enabled: true },
+                yalidine: { id: fetchedConfig.yalidineId || '723bc48271384896a20bd9652c97e081', token: fetchedConfig.yalidineToken || '9cf201929eb6c87a50166b28f872a5cc21f7f1c537ab595d6d8ed5455c5ec7e7', enabled: true },
                 zr: { id: '', token: '', enabled: false },
                 nord_ouest: { id: '', token: '', enabled: false },
                 procolis: { id: '', token: '', enabled: false },
               },
               markupAmount: fetchedConfig.markupAmount || 0,
               markupType: fetchedConfig.markupType || 'fixed',
-              enabled: fetchedConfig.enabled !== undefined ? fetchedConfig.enabled : true
+              enabled: fetchedConfig.enabled !== undefined ? fetchedConfig.enabled : true,
+              manualRates: fetchedConfig.manualRates || []
             });
           } else {
-            setConfig(fetchedConfig);
+            setConfig({
+              ...fetchedConfig,
+              manualRates: fetchedConfig.manualRates || []
+            });
           }
         }
       } catch (err) {
@@ -111,6 +136,29 @@ export default function ShippingSettings() {
     }
   };
 
+  const addManualRate = () => {
+    if (!newRate.id || !newRate.name || newRate.homeFee <= 0) {
+      toast.error('Please fill in required fields (ID, Name, Home Fee)');
+      return;
+    }
+    if ((config.manualRates || []).find(r => r.id === newRate.id)) {
+      toast.error('A rate with this Wilaya ID already exists');
+      return;
+    }
+    setConfig({
+      ...config,
+      manualRates: [...(config.manualRates || []), newRate]
+    });
+    setNewRate({ id: '', name: '', homeFee: 0, hasStopdesk: false, stopdeskFee: 0 });
+  };
+
+  const removeManualRate = (id: string) => {
+    setConfig({
+      ...config,
+      manualRates: (config.manualRates || []).filter(r => r.id !== id)
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -140,12 +188,13 @@ export default function ShippingSettings() {
           </div>
           
           <div className="p-10">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               {[
                 { id: 'yalidine', name: 'Yalidine' },
                 { id: 'zr', name: 'ZR Express' },
                 { id: 'nord_ouest', name: 'Nord et Ouest' },
-                { id: 'procolis', name: 'ProColis' }
+                { id: 'procolis', name: 'ProColis' },
+                { id: 'manual', name: 'Manual' }
               ].map(carrier => (
                 <button
                   key={carrier.id}
@@ -162,79 +211,200 @@ export default function ShippingSettings() {
                   }`}>
                     <Truck size={20} />
                   </div>
-                  <p className="text-xs font-black uppercase tracking-widest">{carrier.name}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest">{carrier.name}</p>
                 </button>
               ))}
             </div>
           </div>
         </div>
 
-        {/* API Credentials */}
-        <div className="bg-white rounded-[40px] border border-gray-100 shadow-xl shadow-black/5 overflow-hidden">
-          <div className="p-8 border-b border-gray-50 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#4C35DE]/10 flex items-center justify-center text-[#4C35DE]">
-              <Key size={24} />
-            </div>
-            <div>
-              <h2 className="text-xl font-black uppercase italic tracking-tighter text-[#1A202C]">
-                {config.activeCarrier === 'yalidine' ? 'Yalidine' : 
-                 config.activeCarrier === 'zr' ? 'ZR Express' : 
-                 config.activeCarrier === 'nord_ouest' ? 'Nord et Ouest' : 'ProColis'} API
-              </h2>
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Carrier integration credentials</p>
-            </div>
-          </div>
-          
-          <div className="p-10 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">API ID / KEY</label>
-                <input 
-                  type="text" 
-                  value={config.carriers?.[config.activeCarrier]?.id || ''}
-                  onChange={e => setConfig({
-                    ...config, 
-                    carriers: {
-                      ...config.carriers,
-                      [config.activeCarrier]: { 
-                        ...(config.carriers?.[config.activeCarrier] || { id: '', token: '', enabled: false }), 
-                        id: e.target.value 
-                      }
-                    }
-                  })}
-                  placeholder={`Enter ${config.activeCarrier} API ID`}
-                  className="w-full px-6 py-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-[#4C35DE] outline-none bg-gray-50/50 font-bold"
-                />
+        {/* API Credentials or Manual Setup */}
+        {config.activeCarrier !== 'manual' ? (
+          <div className="bg-white rounded-[40px] border border-gray-100 shadow-xl shadow-black/5 overflow-hidden">
+            <div className="p-8 border-b border-gray-50 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-[#4C35DE]/10 flex items-center justify-center text-[#4C35DE]">
+                <Key size={24} />
               </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">API TOKEN / SECRET</label>
-                <input 
-                  type="password" 
-                  value={config.carriers?.[config.activeCarrier]?.token || ''}
-                  onChange={e => setConfig({
-                    ...config, 
-                    carriers: {
-                      ...config.carriers,
-                      [config.activeCarrier]: { 
-                        ...(config.carriers?.[config.activeCarrier] || { id: '', token: '', enabled: false }), 
-                        token: e.target.value 
-                      }
-                    }
-                  })}
-                  placeholder={`Enter ${config.activeCarrier} API Token`}
-                  className="w-full px-6 py-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-[#4C35DE] outline-none bg-gray-50/50 font-bold"
-                />
+              <div>
+                <h2 className="text-xl font-black uppercase italic tracking-tighter text-[#1A202C]">
+                  {config.activeCarrier === 'yalidine' ? 'Yalidine' : 
+                   config.activeCarrier === 'zr' ? 'ZR Express' : 
+                   config.activeCarrier === 'nord_ouest' ? 'Nord et Ouest' : 'ProColis'} API
+                </h2>
+                <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Carrier integration credentials</p>
               </div>
             </div>
             
-            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex gap-4">
-              <Info className="text-blue-500 shrink-0" size={20} />
-              <p className="text-xs text-blue-700 font-medium leading-relaxed">
-                These credentials allow the system to fetch real-time Wilayas, Communes, and shipping fees from the selected carrier.
-              </p>
+            <div className="p-10 space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">API ID / KEY</label>
+                  <input 
+                    type="text" 
+                    value={config.carriers?.[config.activeCarrier]?.id || ''}
+                    onChange={e => setConfig({
+                      ...config, 
+                      carriers: {
+                        ...config.carriers,
+                        [config.activeCarrier]: { 
+                          ...(config.carriers?.[config.activeCarrier] || { id: '', token: '', enabled: false }), 
+                          id: e.target.value 
+                        }
+                      }
+                    })}
+                    placeholder={`Enter ${config.activeCarrier} API ID`}
+                    className="w-full px-6 py-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-[#4C35DE] outline-none bg-gray-50/50 font-bold"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">API TOKEN / SECRET</label>
+                  <input 
+                    type="password" 
+                    value={config.carriers?.[config.activeCarrier]?.token || ''}
+                    onChange={e => setConfig({
+                      ...config, 
+                      carriers: {
+                        ...config.carriers,
+                        [config.activeCarrier]: { 
+                          ...(config.carriers?.[config.activeCarrier] || { id: '', token: '', enabled: false }), 
+                          token: e.target.value 
+                        }
+                      }
+                    })}
+                    placeholder={`Enter ${config.activeCarrier} API Token`}
+                    className="w-full px-6 py-4 rounded-2xl border border-gray-100 focus:ring-2 focus:ring-[#4C35DE] outline-none bg-gray-50/50 font-bold"
+                  />
+                </div>
+              </div>
+              
+              <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex gap-4">
+                <Info className="text-blue-500 shrink-0" size={20} />
+                <p className="text-xs text-blue-700 font-medium leading-relaxed">
+                  These credentials allow the system to fetch real-time Wilayas, Communes, and shipping fees from the selected carrier.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-white rounded-[40px] border border-gray-100 shadow-xl shadow-black/5 overflow-hidden">
+            <div className="p-8 border-b border-gray-50 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-[#4C35DE]/10 flex items-center justify-center text-[#4C35DE]">
+                <Truck size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-black uppercase italic tracking-tighter text-[#1A202C]">Manual Rates</h2>
+                <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Manage states and stopdesk distribution</p>
+              </div>
+            </div>
+            
+            <div className="p-10 space-y-8">
+              {/* Add New Rate Form */}
+              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-widest text-[#1A202C]">Add Wilaya Rate</h3>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">ID</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., 16"
+                      value={newRate.id}
+                      onChange={e => setNewRate({...newRate, id: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">Wilaya Name</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Alger"
+                      value={newRate.name}
+                      onChange={e => setNewRate({...newRate, name: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2">Home Fee (DA)</label>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={newRate.homeFee || ''}
+                      onChange={e => setNewRate({...newRate, homeFee: Number(e.target.value)})}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 ml-2 flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        checked={newRate.hasStopdesk}
+                        onChange={e => setNewRate({...newRate, hasStopdesk: e.target.checked})}
+                        className="rounded text-[#4C35DE] focus:ring-[#4C35DE]"
+                      />
+                      Stopdesk
+                    </label>
+                    <input 
+                      type="number" 
+                      placeholder="Fee (DA)"
+                      value={newRate.stopdeskFee || ''}
+                      onChange={e => setNewRate({...newRate, stopdeskFee: Number(e.target.value)})}
+                      disabled={!newRate.hasStopdesk}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#4C35DE] outline-none font-bold text-sm disabled:opacity-50 disabled:bg-gray-100"
+                    />
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={addManualRate}
+                    className="h-[46px] bg-[#1A202C] text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-[#4C35DE] transition-colors"
+                  >
+                    <Plus size={18} /> Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Rates List */}
+              {(config.manualRates || []).length > 0 ? (
+                <div className="border border-gray-100 rounded-3xl overflow-hidden">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-100">
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">ID</th>
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Wilaya</th>
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Home Fee</th>
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400">Stopdesk Fee</th>
+                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-400 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {(config.manualRates || []).map(rate => (
+                        <tr key={rate.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="p-4 font-bold text-sm">{rate.id}</td>
+                          <td className="p-4 font-bold text-sm">{rate.name}</td>
+                          <td className="p-4 font-bold text-sm text-[#4C35DE]">{rate.homeFee} DA</td>
+                          <td className="p-4 font-bold text-sm text-gray-600">
+                            {rate.hasStopdesk ? `${rate.stopdeskFee} DA` : <span className="text-gray-400 italic">N/A</span>}
+                          </td>
+                          <td className="p-4 text-right">
+                            <button 
+                              type="button"
+                              onClick={() => removeManualRate(rate.id)}
+                              className="text-red-500 hover:text-red-700 p-2 rounded-lg hover:bg-red-50 transition-colors inline-flex"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center p-8 border-2 border-dashed border-gray-200 rounded-3xl">
+                  <p className="text-gray-400 font-medium">No manual rates configured yet.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Pricing Adjustments */}
         <div className="bg-white rounded-[40px] border border-gray-100 shadow-xl shadow-black/5 overflow-hidden">
